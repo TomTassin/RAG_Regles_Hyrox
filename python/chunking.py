@@ -33,7 +33,7 @@ def section_chunks (chapter: str, section : str, text : str, page : int, source 
         raise ValueError("overlap must be smaller than chunk_size")
 
     if section :
-        header = f"{chapter} > {section}" 
+        header = f"{chapter} > {section} :" 
     else :
         header = chapter
         section = chapter
@@ -75,17 +75,21 @@ def box_text(box: dict) -> str:
 
 
 def box_titles(box: dict) -> tuple[str, str]:
-    chapter, section = "", ""
+    chapter, section, other = "", "", ""
     for line in box['textlines'] or []:
-        if line['bbox'][0] >= LEFT_COLUMN_MAX_X:
-            continue
+
         for span in line['spans']:
-            level = level_size(span['size'])
+            if line['bbox'][0] < LEFT_COLUMN_MAX_X :
+                level = level_size(span['size'])
+            else :
+                level = None
             if level == "chapter":
                 chapter += " " + span['text']
             elif level is not None:
                 section += " " + span['text']
-    return clean(chapter), clean(section)
+            else : 
+                other += " " + span['text']
+    return clean(chapter), clean(section), clean(other)
 
 
 def table_chunk(chapter: str, section: str, box: dict, page: int, source: str) -> Chunk:
@@ -113,11 +117,11 @@ def chunk_box(data: dict, source_file: str) -> list[Chunk]:
             if box['boxclass'] in ('page-footer', 'picture', 'caption'):
                 continue
             if box['boxclass'] not in ('text', 'table'):
-                new_chapter, new_section = box_titles(box)
+                new_chapter, new_section, other = box_titles(box)
                 if new_chapter or new_section:       # boîte de titre : on découpe la section en cours
                     all_chunks.extend(section_chunks(chapter=chapter, section=section, text=text,
                                                         page=section_page, source=source_file))
-                    text = ""
+                    text = other
                     section_page = page_number
                     if new_chapter:                  # nouveau chapitre : on vide la section
                         chapter, section = new_chapter, ""
@@ -136,7 +140,7 @@ def chunk_box(data: dict, source_file: str) -> list[Chunk]:
             text += " " + b_text
 
     all_chunks.extend(section_chunks(chapter=chapter, section=section, text=text,
-                                        page=page_number, source=source_file))
+                                        page=section_page, source=source_file))
     
     return all_chunks
 
@@ -154,7 +158,8 @@ def load_doc(pdf : str) :
 
 def chunk_pdf(pdf : str) -> list[Chunk] :
     data = load_doc(pdf)
-    return chunk_box(data, pdf)
+    
+    return chunk_box(data, Path(pdf).name)
 
 if __name__ == "__main__" :
     try :
@@ -165,4 +170,5 @@ if __name__ == "__main__" :
 
     data = load_doc(pdf)
     final_chunks = chunk_pdf(pdf)
-    print(len(final_chunks))
+    for i in range (10, 15) :
+        print(f"Chunk {i} : {final_chunks[i]}\n")
