@@ -1,6 +1,5 @@
 from typing import TypedDict
 
-import pymupdf4llm
 import pymupdf
 import numpy as np
 import re
@@ -67,7 +66,7 @@ def level_size(size : int) -> bool :
     return None
 
 def clean(text: str) -> str:
-    return re.sub(r'\s+', ' ', text).strip()
+    return re.sub(r'\s+', ' ', text or "").strip()
 
 
 def box_text(box: dict) -> str:
@@ -93,13 +92,23 @@ def box_titles(box: dict) -> tuple[str, str]:
 
 
 def table_chunk(chapter: str, section: str, box: dict, page: int, source: str) -> Chunk:
-    if not section : 
-        section = chapter 
+    text = ""
+    rows = [[clean(cell) for cell in row] for row in box['table']['extract']]
+
+    for row in rows[1:] :
+        text += f"{row[0]} : " + ', '.join((clean(rows[0][j]) + " " + clean(cell)) 
+                                           for j,cell in enumerate(row[1:] , start=1) if cell) + "\n"
+
+    if section :
+        header = f"{chapter} > {section} :" 
+    else :
+        header = chapter
+        section = chapter
     return {
         'chapter': chapter,
         'section': section,
         'page': page,
-        'text': box['table']['markdown'],
+        'text': f"{header}\n{text}",
         'source': source,
     }
 
@@ -168,7 +177,7 @@ if __name__ == "__main__" :
         print(f"Usage : {sys.argv[0]} file.pdf")
         sys.exit(1)
 
-    data = load_doc(pdf)
-    final_chunks = chunk_pdf(pdf)
-    for i in range (10, 15) :
-        print(f"Chunk {i} : {final_chunks[i]}\n")
+    chunks = chunk_pdf(pdf=pdf)
+
+    for chunk in chunks[10:15] :
+        print(f"Chunk : {chunk}\n")
