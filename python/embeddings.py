@@ -5,13 +5,13 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from chunking import Chunk, chunk_pdf
 
 
-TOP_K = 10
-TOP_N = 3
-BI_ENCODER_NAME = "paraphrase-multilingual-mpnet-base-v2"
+TOP_K = 15
+TOP_N = 5
+BI_ENCODER_NAME = "intfloat/multilingual-e5-base"
 RERANKER_NAME = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 
 def embed_chunks (chunks : list[Chunk], model : SentenceTransformer) -> np.ndarray:
-    texts = [c['text'] for c in chunks]
+    texts = ["passage: " + c['text'] for c in chunks]
     return model.encode(texts, normalize_embeddings=True)
 
 def rerank_scores(chunks : list[Chunk], question : str, top_indices : list[int], reranker : CrossEncoder) :
@@ -23,7 +23,7 @@ def create_models():
 
 def retrieve_chunks(question : str, chunks : list[Chunk], bi_encoder : SentenceTransformer, reranker: CrossEncoder, 
                     chunk_embeddings : np.ndarray) -> list[Chunk]: 
-    question_embedding = bi_encoder.encode(question, normalize_embeddings=True)
+    question_embedding = bi_encoder.encode("query: " + question, normalize_embeddings=True)
     
     bi_scores = chunk_embeddings @ question_embedding
     top_indices = np.argsort(bi_scores)[::-1][:TOP_K]
