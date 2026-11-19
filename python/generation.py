@@ -2,7 +2,7 @@ from ollama import chat
 from embeddings import retrieve_chunks, create_models, embed_chunks
 from chunking import chunk_pdf
 
-MODEL_NAME = 'ministral-3:3b'
+MODEL_NAME = 'qwen3:4b-instruct-2507-q4_K_M'
 
 SYSTEM_PROMPT = ("Tu réponds à des questions sur le règlement de l'Hyrox. "
                 "Réponds en français, uniquement à partir des extraits fournis. " 
@@ -14,6 +14,7 @@ def generate_answer(prompt : str) -> str :
         model=MODEL_NAME,
         messages=[{'role': 'system', 'content' : SYSTEM_PROMPT},
                     {'role': 'user', 'content' : prompt}],
+        think=False,
     )
     return response.message.content
 
@@ -41,4 +42,6 @@ if __name__ == "__main__":
     chunks = retrieve_chunks(question=question, chunks=chunks, bi_encoder=bi_encoder,
                                 reranker=reranker, chunk_embeddings=chunk_embeddings)
 
+    for chunk in chunks:
+        print(f"Chunk : {chunk}\n") 
     print(generate_answer(prompt=generate_prompt(chunks=chunks, question=question)))
