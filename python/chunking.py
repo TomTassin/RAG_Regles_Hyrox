@@ -1,4 +1,5 @@
 from typing import TypedDict
+from ollama import chat
 
 import pymupdf
 import numpy as np
@@ -7,20 +8,44 @@ import sys
 from pathlib import Path
 import json
 
+DATA_DIR = Path(__file__).parent.parent / "data"
+DESCRIPTIONS_FILE = DATA_DIR / "table_descriptions.json"
+CHUNKS_FILE = DATA_DIR / "chunks.json"
+
 PAGES_SOMMAIRE = 3
 
 TITLE_SIZES = {"chapter": 40, "section": 16, "subsection": 10}
 TOLERANCE_SIZE = 0.5
+SECTION_NUMBER = re.compile(r'^\d{1,2}(\.\d{1,2})+\s')
 
 LEFT_COLUMN_MAX_X = 280
+
+DESCRIBE_PROMPT = ("Tu décris des tableaux extraits du règlement HYROX. "
+    "En une seule phrase en français, dis ce que contient le tableau, "
+    "avec les mots spécifiques à l'HYROX "
+    "(par exemple : distance, poids, répétitions, points, pénalité, division, station). "
+    "Ne recopie pas les valeurs du tableau. "
+    "N'invente rien."
+)
+
+DESCRIBE_MODEL = 'ministral-3:3b'
 
 class Chunk(TypedDict):
     chapter: str
     section: str
     page: int
+    description_table: str
     text: str
-    source: str #name of the providence file
+    source: str # name of the source file
 
+
+def describe_table(title: str, table) :
+    description = chat(
+        model = DESCRIBE_MODEL,
+        messages = [{'role': 'system', 'content': DESCRIBE_PROMPT},
+                    {'role': 'user', 'content': f"Section : {title}\nTableau :\n{table}"}]
+        )
+    return clean(description.message.content)
 
 def section_chunks (chapter: str, section : str, text : str, page : int, source : str, chunk_size : int = 100, overlap : int = 20) -> list[Chunk]:
     """ 
@@ -45,11 +70,12 @@ def section_chunks (chapter: str, section : str, text : str, page : int, source 
         end = min(start + chunk_size, len(words))
         chunk = " ".join(words[start : end]).strip()
         chunks.append({
-            "chapter": chapter,
-            "section": section,
-            "page": page,
-            "text": f"{header}\n{chunk}",
-            "source": source
+            'chapter': chapter,
+            'section': section,
+            'page': page,
+            'description_table': "",
+            'text': f"{header}\n{chunk}",
+            'source': source
         })
 
         if end == len(words):          # fin atteinte : pas de chunk en double
@@ -88,32 +114,37 @@ def box_titles(box: dict) -> tuple[str, str]:
                 section += " " + span['text']
             else : 
                 other += " " + span['text']
+    # à la fin de box_titles, avant le return
+    section = clean(section)
+    if section and not SECTION_NUMBER.match(section):
+        other = section + " " + other
+        section = ""
     return clean(chapter), clean(section), clean(other)
 
 
-def table_chunk(chapter: str, section: str, box: dict, page: int, source: str) -> Chunk:
-    text = ""
-    rows = [[clean(cell) for cell in row] for row in box['table']['extract']]
-
-    for row in rows[1:] :
-        text += f"{row[0]} : " + ', '.join((clean(rows[0][j]) + " " + clean(cell)) 
-                                           for j,cell in enumerate(row[1:] , start=1) if cell) + "\n"
-
+def table_chunk(chapter: str, section: str, box: dict, descriptions: dict[str, str], page: int, source: str) -> Chunk:
     if section :
         header = f"{chapter} > {section} :" 
     else :
         header = chapter
         section = chapter
+
+    key = f"{page} : {' | '.join(clean(cell) for cell in box['table']['extract'][0])}"
+    if key not in descriptions:
+        descriptions[key] = describe_table(header, box['table']['markdown'])
+    description = descriptions[key]
+
     return {
         'chapter': chapter,
         'section': section,
         'page': page,
-        'text': f"{header}\n{text}",
+        'description_table': f"{header}\n{description}",
+        'text': f"{header}\n{box['table']['markdown']}",
         'source': source,
     }
 
 
-def chunk_box(data: dict, source_file: str) -> list[Chunk]:
+def chunk_box(data: dict, source_file: str, descriptions: dict[str, str]) -> list[Chunk]:
     all_chunks: list[Chunk] = []
     chapter = ""
     section = ""
@@ -139,7 +170,7 @@ def chunk_box(data: dict, source_file: str) -> list[Chunk]:
                     continue
 
             if box['boxclass'] == 'table' and box['table']:
-                all_chunks.append(table_chunk(chapter, section, box, page_number, source_file))
+                all_chunks.append(table_chunk(chapter, section, box, descriptions, page_number, source_file))
                 continue
 
             b_text = box_text(box)
@@ -154,6 +185,17 @@ def chunk_box(data: dict, source_file: str) -> list[Chunk]:
     return all_chunks
 
 
+def chunk_pdf(pdf : str) -> list[Chunk] :
+    if CHUNKS_FILE.exists():                               # déjà fait : on relit le fichier
+        return load_chunks()
+
+    data = load_doc(pdf)
+    descriptions = load_descriptions()
+    chunks = chunk_box(data, Path(pdf).name, descriptions)
+    save_descriptions(descriptions)
+    save_chunks(chunks)
+    return chunks
+
 def load_doc(pdf : str) :
     path_pdf = Path(pdf)
     if not path_pdf.exists() : 
@@ -165,10 +207,20 @@ def load_doc(pdf : str) :
     
     return json.loads(doc_json)
 
-def chunk_pdf(pdf : str) -> list[Chunk] :
-    data = load_doc(pdf)
-    
-    return chunk_box(data, Path(pdf).name)
+
+def load_chunks() -> list[Chunk]:
+    return json.loads(CHUNKS_FILE.read_text(encoding="utf-8"))
+
+def save_chunks(chunks: list[Chunk]) -> None:
+    CHUNKS_FILE.write_text(json.dumps(chunks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def load_descriptions() -> dict[str, str]:
+    if DESCRIPTIONS_FILE.exists():
+        return json.loads(DESCRIPTIONS_FILE.read_text(encoding="utf-8"))
+    return {}
+
+def save_descriptions(descriptions: dict[str, str]) -> None:
+    DESCRIPTIONS_FILE.write_text(json.dumps(descriptions, ensure_ascii=False, indent=2), encoding="utf-8")
 
 if __name__ == "__main__" :
     try :
